@@ -384,6 +384,7 @@ public class BrowserViewController: UIViewController, BrowserViewControllerDeleg
           self.updateDisplayedPopoverProperties?()
           self.present(popover, animated: true, completion: nil)
         }
+        self.pipViewCoordinator?.resetBounds(bounds: .init(size: size))
       },
       completion: { _ in
         if let tab = self.tabManager.selectedTab {
