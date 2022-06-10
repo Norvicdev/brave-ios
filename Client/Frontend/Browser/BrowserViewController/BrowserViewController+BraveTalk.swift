@@ -23,22 +23,17 @@ extension BrowserViewController {
 }
 
 extension BrowserViewController: JitsiMeetViewDelegate {
-  func conferenceTerminated(_ data: [AnyHashable: Any]!) {
-    dismiss(animated: true) { [self] in
-      jitsiMeetView = nil
-      pipViewCoordinator = nil
-    }
-  }
-  
-  func ready(toClose data: [AnyHashable: Any]!) {
+  public func ready(toClose data: [AnyHashable: Any]!) {
     DispatchQueue.main.async { [self] in
       pipViewCoordinator?.hide() { [self] _ in
         jitsiMeetView?.removeFromSuperview()
+        jitsiMeetView = nil
+        pipViewCoordinator = nil
       }
     }
   }
   
-  func enterPicture(inPicture data: [AnyHashable: Any]!) {
+  public func enterPicture(inPicture data: [AnyHashable: Any]!) {
     DispatchQueue.main.async { [self] in
       jitsiMeetView?.frame = view.window?.bounds ?? view.bounds
       isBraveTalkInPiPMode = true
@@ -48,7 +43,7 @@ extension BrowserViewController: JitsiMeetViewDelegate {
 }
 
 extension BrowserViewController: PiPViewCoordinatorDelegate {
-  func exitPictureInPicture() {
+  public func exitPictureInPicture() {
     isBraveTalkInPiPMode = false
     jitsiMeetView?.frame = view.window?.bounds ?? view.bounds
   }

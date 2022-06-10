@@ -76,6 +76,7 @@ let package = Package(
         "BrowserIntentsModels",
         "BraveWidgetsModels",
         "BraveVPN",
+        "JitsiMeet",
         .product(name: "Lottie", package: "lottie-ios"),
         .product(name: "Collections", package: "swift-collections"),
       ],
