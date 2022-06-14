@@ -13,6 +13,7 @@ extension JitsiMeetConferenceOptions {
       builder.room = room
       builder.token = token
       builder.serverURL = URL(string: "https://8x8.vc")
+      builder.setSubject("Brave Talk")
       builder.setConfigOverride("analytics", with: ["disabled": true, "rtcstatsEnabled": false])
       if let roomId = room.split(separator: "/").last {
         builder.setConfigOverride("brandingRoomAlias", withValue: roomId)
