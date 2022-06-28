@@ -325,7 +325,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     AdblockResourceDownloader.shared.startLoading()
-    CosmeticFiltersResourceDownloader.shared.startLoading()
     DebouncingResourceDownloader.shared.startLoading()
 
     return shouldPerformAdditionalDelegateHandling

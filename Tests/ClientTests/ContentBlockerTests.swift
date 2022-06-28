@@ -63,60 +63,38 @@ class ContentBlockerTests: XCTestCase {
   }
 
   func testCompilation() {
-    let validRule = """
+    let validJSON = """
       [{"trigger":{"url-filter":"-pubblicita300x275\\\\."},"action":{"type":"block"}}]
       """
-
-    compile(jsonString: validRule, expectSuccess: true)
+    let data = validJSON.data(using: .utf8)!
+    compile(data: data, expectSuccess: true)
   }
 
   func testCompilationFailure() {
-    let invalidJson = "badJson content rule"
-    compile(jsonString: invalidJson, expectSuccess: false)
+    let invalidJSON = "badJson content rule"
+    let data = invalidJSON.data(using: .utf8)!
+    compile(data: data, expectSuccess: false)
   }
 
-  func testCompilationEmptyData() {
-    compile(jsonString: nil, expectSuccess: false)
-  }
-
-  func testGettingRegionalContentBlocker() {
-    XCTAssertNil(ContentBlockerRegion.with(localeCode: nil))
-
-    XCTAssertNil(
-      ContentBlockerRegion.with(localeCode: "en"),
-      "Regional content blocker should be disabled for english locale")
-
-    let validLocale = "pl"
-    let valid = ContentBlockerRegion.with(localeCode: validLocale)
-    XCTAssertEqual(valid?.filename, validLocale)
-
-    let invalidLocale = "xx"
-    XCTAssertNil(ContentBlockerRegion.with(localeCode: invalidLocale))
-
-  }
-
-  private func compile(jsonString json: String?, expectSuccess: Bool) {
-    let data = json?.data(using: .utf8)
-
+  private func compile(data: Data, expectSuccess: Bool) {
     let exp = XCTestExpectation(description: "compile")
-    exp.isInverted = !expectSuccess
     
-    var task: AnyCancellable?
-    task = contentBlocker?.compile(data: data, ruleStore: self.store)
-      .sink(receiveCompletion: { res in
-        switch res {
-        case .failure(let error):
-          if expectSuccess {
-            XCTFail("Error Compiling Content Blocker Rules: \(error)")
-          }
-        default:
-          exp.fulfill()
+    Task {
+      do {
+        try await contentBlocker.compile(data: data, ruleStore: self.store)
+        
+        if !expectSuccess {
+          XCTFail("Expected error compiling content blocker rules")
         }
-        task = nil
-      }, receiveValue: { _ in })
-
+      } catch {
+        if expectSuccess {
+          XCTFail("Error compiling content blocker rules \(error)")
+        }
+      }
+      exp.fulfill()
+    }
+    
     wait(for: [exp], timeout: 1)
-
     XCTAssert(true)
   }
 }

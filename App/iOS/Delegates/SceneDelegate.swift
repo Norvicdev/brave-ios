@@ -40,6 +40,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     // initialization. This is because Database container may change. See bugs #3416, #3377.
     DataController.shared.initializeOnce()
     Migration.postCoreDataInitMigrations()
+    FilterListResourceSubscriber.shared.start()
 
     Preferences.General.themeNormalMode.objectWillChange
       .receive(on: RunLoop.main)
@@ -205,7 +206,6 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     // is that this method is only invoked whenever the application is entering the foreground where as
     // `applicationDidBecomeActive` will get called whenever the Touch ID authentication overlay disappears.
     AdblockResourceDownloader.shared.startLoading()
-    CosmeticFiltersResourceDownloader.shared.startLoading()
     DebouncingResourceDownloader.shared.startLoading()
 
     if let scene = scene as? UIWindowScene {

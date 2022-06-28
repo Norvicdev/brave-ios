@@ -3,267 +3,242 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 import Foundation
+import BraveCore
 import Shared
 import BraveShared
-import Combine
 
 private let log = Logger.browserLogger
 
-private struct AdBlockNetworkResource {
-  let resource: CachedNetworkResource
-  let fileType: FileType
-  let type: AdblockerType
-}
-
 public class AdblockResourceDownloader {
   public static let shared = AdblockResourceDownloader()
+  
+  /// A boolean indicating if this is a first time load of this downloader so we only load cached data once
+  private var initialLoad = true
+  private let resourceDownloader: ResourceDownloader
+  private let serialQueue = DispatchQueue(label: "com.brave.FilterListManager-dispatch-queue")
 
-  private let networkManager: NetworkManager
-  private let locale: String
-
-  static let folderName = "abp-data"
-  private let servicesKeyName = "SERVICES_KEY"
-  private let servicesKeyHeaderValue = "BraveServiceKey"
-
-  /// The base s3 environment url that hosts the debouncing (and other) files.
-  /// Cannot be used as-is and must be combined with a path
-  private lazy var baseResourceURL: URL = {
-    if AppConstants.buildChannel.isPublic {
-      return URL(string: "https://adblock-data.s3.brave.com")!
-    } else {
-      return URL(string: "https://adblock-data-staging.s3.bravesoftware.com")!
-    }
-  }()
-
-  init(networkManager: NetworkManager = NetworkManager(), locale: String? = Locale.current.languageCode) {
-    if locale == nil {
-      log.warning("No locale provided, using default one(\"en\")")
-    }
-    self.locale = locale ?? "en"
-    self.networkManager = networkManager
-
-    Preferences.Shields.useRegionAdBlock.observe(from: self)
+  init(networkManager: NetworkManager = NetworkManager()) {
+    self.resourceDownloader = ResourceDownloader(networkManager: networkManager)
   }
 
   /// Initialized with year 1970 to force adblock fetch at first launch.
   private(set) var lastFetchDate = Date(timeIntervalSince1970: 0)
-  private var adblockResourceDownloader: AnyCancellable?
 
   public func startLoading() {
+    guard initialLoad else { return }
+    initialLoad = false
+    
+    Task {
+      await loadStoredDate()
+      await startFetching()
+    }
+  }
+
+  @MainActor private func startFetching() {
+    assertIsMainThread("Not on main thread")
     let now = Date()
     let fetchInterval = AppConstants.buildChannel.isPublic ? 6.hours : 10.minutes
-
+    
     if now.timeIntervalSince(lastFetchDate) >= fetchInterval {
       lastFetchDate = now
-      
-      let regionalSetup = regionalAdblockResourcesSetup().catch { error -> AnyPublisher<Void, Never> in
-        log.error("Failed to Download Regional Adblock-Resources: \(error)")
-        return Just(()).eraseToAnyPublisher()
-      }
-      
-      let generalSetup = generalAdblockResourcesSetup().catch { error -> AnyPublisher<Void, Never> in
-        log.error("Failed to Download General Adblock-Resources: \(error)")
-        return Just(()).eraseToAnyPublisher()
-      }
-      
-      adblockResourceDownloader = Publishers.Merge(regionalSetup, generalSetup)
-        .collect()
-        .receive(on: DispatchQueue.main)
-        .sink { _ in
-          log.debug("Finished Setting Up Adblock-Resources")
+      downloadFilterRules()
+      downloadContentBlockingBehaviours()
+      downloadCosmeticFilterData()
+    }
+  }
+  
+  private func loadStoredDate() async {
+    await withTaskGroup(of: Void.self) { group in
+      group.addTask {
+        do {
+          try await self.loadEngineFromGeneralFilterRules()
+        } catch {
+          log.error(error)
         }
+      }
+      
+      group.addTask {
+        do {
+          try await self.loadEngineFromGeneralCosmeticFilterResources()
+        } catch {
+          log.error(error)
+        }
+      }
+      
+      group.addTask {
+        do {
+          try await self.loadContentBlockers()
+        } catch {
+          log.error(error)
+        }
+      }
+    }
+  }
+  
+  private func downloadFilterRules() {
+    Task.detached(priority: .background) {
+      do {
+        let result = try await self.resourceDownloader.download(resource: .genericFilterRules)
+        
+        switch result {
+        case .notModified:
+          // No need to reload this
+          break
+        case .downloaded:
+          try await self.loadEngineFromGeneralFilterRules()
+        }
+      } catch {
+        log.error(error)
+      }
+    }
+  }
+  
+  private func downloadContentBlockingBehaviours() {
+    Task.detached(priority: .background) {
+      do {
+        let result = try await self.resourceDownloader.download(resource: .genericContentBlockingBehaviors)
+        
+        switch result {
+        case .notModified:
+          // No need to reload this
+          break
+        case .downloaded:
+          try await self.loadContentBlockers()
+        }
+      } catch {
+        log.error(error)
+      }
     }
   }
 
-  func regionalAdblockResourcesSetup() -> AnyPublisher<Void, Error> {
-    if !Preferences.Shields.useRegionAdBlock.value {
-      log.debug("Regional adblocking disabled, aborting attempt to download regional resources")
-      return Empty(outputType: Void.self, failureType: Error.self).eraseToAnyPublisher()
+  private func downloadCosmeticFilterData() {
+    Task.detached(priority: .background) {
+      do {
+        let results = try await self.fetchDownloadCosmeticFilterData()
+        
+        var isModified = false
+        switch results.cosmeticFilters {
+        case .notModified: break
+        case .downloaded: isModified = true
+        }
+        
+        switch results.scriptletResources {
+        case .notModified: break
+        case .downloaded: isModified = true
+        }
+        
+        if isModified {
+          try await self.loadEngineFromGeneralCosmeticFilterResources()
+        }
+      } catch {
+        log.error(error)
+      }
     }
-
-    return downloadResources(type: .regional(locale: locale))
-      .receive(on: DispatchQueue.main)
-      .map {
-        log.debug("Regional blocklists download and setup completed.")
-        Preferences.Debug.lastRegionalAdblockUpdate.value = Date()
-      }.eraseToAnyPublisher()
   }
-
-  func generalAdblockResourcesSetup() -> AnyPublisher<Void, Error> {
-    return downloadResources(type: .general)
-      .receive(on: DispatchQueue.main)
-      .map {
-        log.debug("General blocklists download and setup completed.")
-        Preferences.Debug.lastGeneralAdblockUpdate.value = Date()
-      }.eraseToAnyPublisher()
-  }
-
-  private func downloadResources(type: AdblockerType) -> AnyPublisher<Void, Error> {
-    let nm = networkManager
-    let folderName = AdblockResourceDownloader.folderName
-
-    // file name of which the file will be saved on disk
-    let fileName = type.identifier
+  
+  private func loadEngineFromGeneralFilterRules() async throws {
+    let engine = AdblockEngine()
     
-    let completedDownloads = type.associatedFiles.compactMap({ [weak self] fileType -> AnyPublisher<AdBlockNetworkResource, Error>? in
-      guard let self = self else { return nil }
-      
-      let fileExtension = fileType.rawValue
-      let etagExtension = fileExtension + ".etag"
-      let cacheFileName = [fileName, etagExtension].joined(separator: ".")
+    if let data = try ResourceDownloader.data(for: .genericFilterRules) {
+      try await self.deserialize(data: data, into: engine)
+    }
+    
+    await self.set(genericEngine: engine)
+  }
+  
+  private func loadEngineFromGeneralCosmeticFilterResources() async throws {
+    let engine = AdblockEngine()
+    
+    if let data = try ResourceDownloader.data(for: .generalCosmeticFilters) {
+      try await deserialize(data: data, into: engine)
+    }
+    
+    if let data = try ResourceDownloader.data(for: .generalScriptletResources) {
+      try await addJSON(data: data, into: engine)
+    }
+    
+    await set(cosmeticFilteringEngine: engine)
+  }
+  
+  private func loadContentBlockers() async throws {
+    guard let contentBlockerData = try ResourceDownloader.data(for: .genericContentBlockingBehaviors) else {
+      return
+    }
+    try await compileContentBlocker(data: contentBlockerData)
+  }
+  
+  @MainActor private func set(genericEngine: AdblockEngine) {
+    assertIsMainThread("Not on main thread")
+    AdBlockStats.shared.set(genericEngine: genericEngine)
+  }
+  
+  @MainActor private func set(cosmeticFilteringEngine: AdblockEngine) {
+    assertIsMainThread("Not on main thread")
+    AdBlockStats.shared.set(cosmeticFilteringEngine: cosmeticFilteringEngine)
+  }
+  
+  typealias CosmeticFilterResult = (
+    cosmeticFilters: ResourceDownloader.DownloadResult<URL>,
+    scriptletResources: ResourceDownloader.DownloadResult<URL>
+  )
+  
+  private func fetchDownloadCosmeticFilterData() async throws -> CosmeticFilterResult {
+    async let cosmeticFilters = try self.resourceDownloader.download(resource: .generalCosmeticFilters)
+    async let scriptletResources = try self.resourceDownloader.download(resource: .generalScriptletResources)
+    return try await (cosmeticFilters, scriptletResources)
+  }
 
-      guard let resourcePath = type.resourcePath(for: fileType) else {
-        return nil
+  private func compileContentBlocker(data: Data) async throws {
+    let blockList = BlocklistName.ad
+    return try await blockList.compile(data: data)
+  }
+  
+  private func deserialize(data: Data, into engine: AdblockEngine) async throws {
+    return try await withCheckedThrowingContinuation({ continuation in
+      self.serialQueue.async {
+        if engine.deserialize(data: data) {
+          continuation.resume()
+        } else {
+          continuation.resume(throwing: "Failed to deserialize data")
+        }
       }
-
-      guard let url = URL(string: resourcePath, relativeTo: baseResourceURL) else {
-        assertionFailure("This uses all hardcoded components so it should not fail unless we made a mistake somewhere")
-        return nil
-      }
-      
-      var headers = [String: String]()
-      if let servicesKeyValue = Bundle.main.getPlistString(for: self.servicesKeyName) {
-        headers[self.servicesKeyHeaderValue] = servicesKeyValue
-      }
-
-      let etag = self.fileFromDocumentsAsString(cacheFileName, inFolder: folderName)
-      return nm.downloadResource(
-        with: url,
-        resourceType: .cached(etag: etag),
-        checkLastServerSideModification: !AppConstants.buildChannel.isPublic,
-        customHeaders: headers)
-        .compactMap({ resource in
-          if resource.data.isEmpty {
-            return nil
-          }
-
-          return AdBlockNetworkResource(
-            resource: resource,
-            fileType: fileType,
-            type: type)
-        }).eraseToAnyPublisher()
     })
-    
-    return Publishers.MergeMany(completedDownloads)
-      .collect()
-      .subscribe(on: DispatchQueue.global(qos: .userInitiated))
-      .flatMap { resources in
-        // json to content rules compilation happens first, otherwise it makes no sense to proceed further
-        // and overwrite old files that were working before.
-        self.compileContentBlocker(resources: resources).compactMap({
-          self.writeFilesToDisk(resources: resources, name: fileName) ? resources : nil
-        })
-      }
-      .flatMap {
-        return self.setUpFiles(resources: $0, compileJsonRules: false)
-      }
-      .eraseToAnyPublisher()
   }
-
-  private func fileFromDocumentsAsString(_ name: String, inFolder folder: String) -> String? {
-    guard let folderUrl = FileManager.default.getOrCreateFolder(name: folder) else {
-      log.error("Failed to get folder: \(folder)")
-      return nil
-    }
-
-    let fileUrl = folderUrl.appendingPathComponent(name)
-    guard let data = FileManager.default.contents(atPath: fileUrl.path) else { return nil }
-    return String(data: data, encoding: .utf8)
-  }
-
-  private func compileContentBlocker(resources: [AdBlockNetworkResource]) -> AnyPublisher<Void, Error> {
-    if resources.isEmpty {
-      return Fail(error: "No Adblock Resource to Compile").eraseToAnyPublisher()
-    }
-    
-    let lists = resources.filter({ $0.fileType == .json })
-      .compactMap({ res in
-        return res.type.blockListName?.compile(data: res.resource.data)
-      })
-    
-    return Publishers.MergeMany(lists)
-      .collect()
-      .map { _ in () }
-      .eraseToAnyPublisher()
-  }
-
-  private func writeFilesToDisk(resources: [AdBlockNetworkResource], name: String) -> Bool {
-    var fileSaveCompletions = [Bool]()
-    let fm = FileManager.default
-    let folderName = AdblockResourceDownloader.folderName
-
-    resources.forEach {
-      let fileName = name + ".\($0.fileType.rawValue)"
-      fileSaveCompletions.append(
-        fm.writeToDiskInFolder(
-          $0.resource.data, fileName: fileName,
-          folderName: folderName))
-
-      if let etag = $0.resource.etag, let data = etag.data(using: .utf8) {
-        let etagFileName = fileName + ".etag"
-        fileSaveCompletions.append(
-          fm.writeToDiskInFolder(
-            data, fileName: etagFileName,
-            folderName: folderName))
-      }
-
-      if let lastModified = $0.resource.lastModifiedTimestamp,
-        let data = String(lastModified).data(using: .utf8) {
-        let lastModifiedFileName = fileName + ".lastmodified"
-        fileSaveCompletions.append(
-          fm.writeToDiskInFolder(
-            data, fileName: lastModifiedFileName,
-            folderName: folderName))
-      }
-
-    }
-
-    // Returning true if all file saves completed succesfully
-    return !fileSaveCompletions.contains(false)
-  }
-
-  private func setUpFiles(resources: [AdBlockNetworkResource], compileJsonRules: Bool) -> AnyPublisher<Void, Error> {
-    if resources.isEmpty {
-      return Fail(error: "No Adblock Resource to Setup").eraseToAnyPublisher()
-    }
-    
-    let resources: [AnyPublisher<Void, Error>] = resources.compactMap {
-      switch $0.fileType {
-      case .dat:
-        return AdBlockStats.shared.setDataFile(
-          data: $0.resource.data,
-          id: $0.type.identifier)
-      case .json:
-        if compileJsonRules {
-          return self.compileContentBlocker(resources: resources)
+  
+  private func addJSON(data: Data, into engine: AdblockEngine) async throws {
+    return try await withCheckedThrowingContinuation({ continuation in
+      self.serialQueue.async {
+        if !self.isValidJSONData(data) {
+          continuation.resume(throwing: "Invalid JSON Data")
+          return
         }
-        return nil
-      }
-    }
-    
-    return Publishers.MergeMany(resources)
-      .collect()
-      .map { _ in () }
-      .eraseToAnyPublisher()
-  }
-}
-
-extension AdblockResourceDownloader: PreferencesObserver {
-  public func preferencesDidChange(for key: String) {
-    let regionalAdblockPref = Preferences.Shields.useRegionAdBlock
-    if key == regionalAdblockPref.key {
-      var cancellable: AnyCancellable?
-      cancellable = regionalAdblockResourcesSetup()
-        .subscribe(on: DispatchQueue.global(qos: .userInitiated))
-        .receive(on: DispatchQueue.main)
-        .sink { res in
-          if case .failure(let error) = res {
-            log.error(error)
-          }
-          cancellable = nil
-        } receiveValue: { _ in
-          log.debug("Successfully Setup Adblock Regional Preferences")
+        
+        if let json = String(data: data, encoding: .utf8) {
+          engine.addResources(json)
+          continuation.resume()
+        } else {
+          continuation.resume(throwing: "Invalid JSON String - Bad Encoding")
         }
+      }
+    })
+  }
+  
+  private func isValidJSONData(_ data: Data) -> Bool {
+    do {
+      let value = try JSONSerialization.jsonObject(with: data, options: [])
+      if let value = value as? NSArray {
+        return value.count > 0
+      }
+      
+      if let value = value as? NSDictionary {
+        return value.count > 0
+      }
+      
+      log.error("JSON Must have a top-level type of Array of Dictionary.")
+      return false
+    } catch {
+      log.error("JSON Deserialization Failed: \(error)")
+      return false
     }
   }
 }

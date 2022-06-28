@@ -54,15 +54,18 @@ class BlocklistName: CustomStringConvertible, ContentBlocker {
     return Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
   }()
 
-  static func blocklists(forDomain domain: Domain, locale: String? = Locale.current.languageCode) -> (on: Set<BlocklistName>, off: Set<BlocklistName>) {
-    let regionalBlocker = ContentBlockerRegion.with(localeCode: locale)
-
+  static func blocklists(forDomain domain: Domain) -> (on: Set<BlocklistName>, off: Set<BlocklistName>) {
+    let filterListWrappers = FilterListResourceSubscriber.shared.filterListWrappers
+    
+    let allFilterListBlockLists = Set(filterListWrappers.map { filterListWrapper -> BlocklistName in
+      return filterListWrapper.makeBlocklistName()
+    })
+    
     if domain.shield_allOff == 1 {
       var offList = allLists
-      // Make sure to consider the regional list which needs to be disabled as well
-      if let regionalBlocker = regionalBlocker {
-        offList.insert(regionalBlocker)
-      }
+      
+      // Make sure to consider the filter list which needs to be disabled as well
+      offList = offList.intersection(allFilterListBlockLists)
       return ([], offList)
     }
 
@@ -70,22 +73,25 @@ class BlocklistName: CustomStringConvertible, ContentBlocker {
 
     if domain.isShieldExpected(.AdblockAndTp, considerAllShieldsOption: true) {
       onList.formUnion([.ad, .tracker])
-
-      if Preferences.Shields.useRegionAdBlock.value, let regionalBlocker = regionalBlocker {
-        onList.insert(regionalBlocker)
-      }
     }
+    
+    let enabledFilterLists = Set(filterListWrappers.compactMap { filterListWrapper -> BlocklistName? in
+      guard filterListWrapper.isEnabled else { return nil }
+      let filterListState = FilterListResourceSubscriber.shared.state(
+        for: filterListWrapper.filterList, resourceType: .contentBlockingBehaviors
+      )
+      switch filterListState?.loadState {
+      case .loaded: return filterListWrapper.makeBlocklistName()
+      case .notLoaded, .error, .none: return nil
+      }
+    })
+    
+    onList = onList.intersection(enabledFilterLists)
 
     // For lists not implemented, always return exclude from `onList` to prevent accidental execution
-
     // TODO #159: Setup image shield
-
-    var offList = allLists.subtracting(onList)
-    // Make sure to consider the regional list since the user may disable it globally
-    if let regionalBlocker = regionalBlocker, !onList.contains(regionalBlocker) {
-      offList.insert(regionalBlocker)
-    }
-
+    let disabledFilterLists = allFilterListBlockLists.subtracting(enabledFilterLists)
+    let offList = allLists.subtracting(onList).intersection(disabledFilterLists)
     return (onList, offList)
   }
 
@@ -101,31 +107,25 @@ class BlocklistName: CustomStringConvertible, ContentBlocker {
   }
 
   func compile(
-    data: Data?,
+    data: Data,
     ruleStore: WKContentRuleListStore = ContentBlockerHelper.ruleStore
-  ) -> AnyPublisher<Void, Error> {
-    return Future { [weak self] completion in
-      guard let self = self else {
-        completion(.failure("BlockListName Deallocated"))
-        return
-      }
-      
-      guard let data = data, let dataString = String(data: data, encoding: .utf8) else {
-        completion(.failure("Could not read data for content blocker compilation."))
+  ) async throws {
+    return try await withCheckedThrowingContinuation { continuation in
+      guard let dataString = String(data: data, encoding: .utf8) else {
+        continuation.resume(returning: ())
         return
       }
 
       ruleStore.compileContentRuleList(forIdentifier: self.filename, encodedContentRuleList: dataString) { rule, error in
         if let error = error {
-          // TODO #382: Potential telemetry location
-          completion(.failure("Content blocker '\(self.filename)' errored: \(error.localizedDescription)"))
+          continuation.resume(throwing: error)
           return
         }
         
         assert(rule != nil)
         self.rule = rule
-        completion(.success(()))
+        continuation.resume()
       }
-    }.eraseToAnyPublisher()
+    }
   }
 }
