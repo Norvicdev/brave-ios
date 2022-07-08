@@ -187,5 +187,9 @@ class MockBraveWalletService: BraveWalletBraveWalletService {
   func base58Encode(_ addresses: [[NSNumber]], completion: @escaping ([String]) -> Void) {
     completion([])
   }
+  
+  func base58Encode(_ addresses: [[NSNumber]], completion: @escaping ([String]) -> Void) {
+    completion([])
+  }
 }
 #endif
