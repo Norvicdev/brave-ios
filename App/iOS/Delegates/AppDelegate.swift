@@ -19,6 +19,7 @@ import BraveCore
 import Combine
 import Brave
 import BraveVPN
+import JitsiMeetSDK
 
 private let log = Logger.browserLogger
 
@@ -325,9 +326,19 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     CosmeticFiltersResourceDownloader.shared.startLoading()
     DebouncingResourceDownloader.shared.startLoading()
 
+    JitsiMeet.sharedInstance().application(application, didFinishLaunchingWithOptions: launchOptions ?? [:])
+    
     return shouldPerformAdditionalDelegateHandling
   }
 
+  func application(_ application: UIApplication, continue userActivity: NSUserActivity, restorationHandler: @escaping ([UIUserActivityRestoring]?) -> Void) -> Bool {
+    return JitsiMeet.sharedInstance().application(application, continue: userActivity, restorationHandler: restorationHandler)
+  }
+  
+  func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {
+    return JitsiMeet.sharedInstance().application(app, open: url, options: options)
+  }
+  
   func applicationWillTerminate(_ application: UIApplication) {
     // We have only five seconds here, so let's hope this doesn't take too long.
     sceneInfo?.profile.shutdown()

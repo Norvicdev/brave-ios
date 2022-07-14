@@ -518,7 +518,7 @@ extension BrowserViewController: WKNavigationDelegate {
         // The website waits on us until this is called with either results or null.
         tab.injectResults()
       }
-
+      
       navigateInTab(tab: tab, to: navigation)
       if let url = tab.url, tab.shouldClassifyLoadsForAds {
         let faviconURL = URL(string: tab.displayFavicon?.url ?? "")

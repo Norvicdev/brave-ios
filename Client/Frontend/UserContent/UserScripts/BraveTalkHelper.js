@@ -35,12 +35,33 @@ Object.defineProperty(window.__firefox__, '$<brave-talk-helper>', {
 });
 
 Object.defineProperty(window, 'chrome', {
-enumerable: false,
-configurable: true,
-writable: false,
-    value: {
+  enumerable: false,
+  configurable: true,
+  writable: false,
+  value: {
     braveRequestAdsEnabled() {
-        return window.__firefox__.$<brave-talk-helper>.sendMessage();
+      return webkit.messageHandlers.BraveTalkHelper.postMessage({
+        'kind': 'braveRequestAdsEnabled',
+        'securitytoken': '$<security_token>'
+      });
     }
-}
+  }
 });
+
+const launchNativeBraveTalk = (url) => {
+  webkit.messageHandlers.BraveTalkHelper.postMessage({
+    'kind': 'launchNativeBraveTalk',
+    'url': url,
+    'securitytoken': '$<security_token>'
+  });
+};
+
+if (document.location.host === "talk.brave.com") {
+  const postRoom = (event) => {
+    if (event.target.tagName !== undefined && event.target.tagName.toLowerCase() == "iframe") {
+      launchNativeBraveTalk(event.target.src);
+      window.removeEventListener("DOMNodeInserted", postRoom)
+    }
+  };
+  window.addEventListener("DOMNodeInserted", postRoom);
+}

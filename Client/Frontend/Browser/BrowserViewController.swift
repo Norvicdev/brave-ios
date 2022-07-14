@@ -26,6 +26,7 @@ import SwiftUI
 import class Combine.AnyCancellable
 import BraveWallet
 import BraveVPN
+import JitsiMeetSDK
 
 private let log = Logger.browserLogger
 
@@ -202,6 +203,11 @@ public class BrowserViewController: UIViewController, BrowserViewControllerDeleg
   private(set) var widgetBookmarksFRC: NSFetchedResultsController<Favorite>?
   var widgetFaviconFetchers: [FaviconFetcher] = []
   let deviceCheckClient: DeviceCheckClient?
+  
+  // Brave Talk native implementations
+  var pipViewCoordinator: PiPViewCoordinator?
+  var jitsiMeetView: JitsiMeetView?
+  var isBraveTalkInPiPMode: Bool = false
 
   /// The currently open WalletStore
   weak var walletStore: WalletStore?
@@ -972,10 +978,15 @@ public class BrowserViewController: UIViewController, BrowserViewControllerDeleg
       make.top.left.right.equalTo(self.view)
       make.bottom.equalTo(view.safeArea.top)
     }
+    
     toolbarVisibilityViewModel.transitionDistance = header.expandedBarStackView.bounds.height - header.collapsedBarContainerView.bounds.height
     // Since the height of the WKWebView changes while collapsing we need to use a stable value to determine
     // if the toolbars can collapse
     toolbarVisibilityViewModel.minimumCollapsableContentHeight = webViewContainer.bounds.height + header.bounds.height + footer.bounds.height + view.safeAreaInsets.top + view.safeAreaInsets.bottom
+
+    if !isBraveTalkInPiPMode {
+      jitsiMeetView?.frame = view.window?.bounds ?? view.bounds
+    }
   }
 
   override public var canBecomeFirstResponder: Bool {
@@ -2296,7 +2307,11 @@ extension BrowserViewController: TabDelegate {
     tab.addContentScript(
       BraveTalkScriptHandler(
         tab: tab,
-        rewards: rewards),
+        rewards: rewards,
+        launchNativeBraveTalk: { [weak self] options in
+          self?.launchNativeBraveTalk(with: options)
+        }
+      ),
       name: BraveTalkScriptHandler.name(), contentWorld: .page)
 
     tab.addContentScript(ResourceDownloadManager(tab: tab), name: ResourceDownloadManager.name(), contentWorld: .defaultClient)

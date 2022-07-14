@@ -47,6 +47,7 @@ let package = Package(
     .package(url: "https://github.com/mkrd/Swift-BigInt", from: "2.0.0"),
     .package(url: "https://github.com/apple/swift-markdown", revision: "4f0c76fcd29fea648915f41e2aa896d47608087a"),
     .package(name: "Static", path: "ThirdParty/Static"),
+    .package(name: "JitsiMeet", path: "ThirdParty/JitsiMeet"),
   ],
   targets: [
     .target(
