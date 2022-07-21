@@ -39,13 +39,13 @@ extension BraveWallet.BlockchainToken {
     coin: .eth
   )
   
-  static let mockSolToken: BraveWallet.BlockchainToken = .init(
+  static let mockSPLToken: BraveWallet.BlockchainToken = .init(
     contractAddress: "0x1111111111222222222233333333334444444444",
-    name: "Solana",
+    name: "Non-SOL",
     logo: "",
     isErc20: false,
     isErc721: false,
-    symbol: "SOL",
+    symbol: "NONSOL",
     decimals: 9,
     visible: false,
     tokenId: "",
