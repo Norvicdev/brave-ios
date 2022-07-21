@@ -67,6 +67,7 @@ public class CryptoStore: ObservableObject {
   let blockchainRegistry: BraveWalletBlockchainRegistry
   private let txService: BraveWalletTxService
   private let ethTxManagerProxy: BraveWalletEthTxManagerProxy
+  private let solTxManagerProxy: BraveWalletSolanaTxManagerProxy
   
   public init(
     keyringService: BraveWalletKeyringService,
@@ -76,7 +77,8 @@ public class CryptoStore: ObservableObject {
     swapService: BraveWalletSwapService,
     blockchainRegistry: BraveWalletBlockchainRegistry,
     txService: BraveWalletTxService,
-    ethTxManagerProxy: BraveWalletEthTxManagerProxy
+    ethTxManagerProxy: BraveWalletEthTxManagerProxy,
+    solTxManagerProxy: BraveWalletSolanaTxManagerProxy
   ) {
     self.keyringService = keyringService
     self.rpcService = rpcService
@@ -86,6 +88,7 @@ public class CryptoStore: ObservableObject {
     self.blockchainRegistry = blockchainRegistry
     self.txService = txService
     self.ethTxManagerProxy = ethTxManagerProxy
+    self.solTxManagerProxy = solTxManagerProxy
     
     self.networkStore = .init(
       keyringService: keyringService,
@@ -168,6 +171,7 @@ public class CryptoStore: ObservableObject {
       walletService: walletService,
       txService: txService,
       blockchainRegistry: blockchainRegistry,
+      solTxManagerProxy: solTxManagerProxy,
       token: token
     )
     assetDetailStore = store
@@ -192,7 +196,8 @@ public class CryptoStore: ObservableObject {
       rpcService: rpcService,
       assetRatioService: assetRatioService,
       txService: txService,
-      blockchainRegistry: blockchainRegistry
+      blockchainRegistry: blockchainRegistry,
+      solTxManagerProxy: solTxManagerProxy
     )
     accountActivityStore = store
     return store
