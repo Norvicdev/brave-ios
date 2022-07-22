@@ -4,6 +4,7 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 import XCTest
+import BigNumber
 @testable import BraveWallet
 
 class WeiFormatterTests: XCTestCase {
@@ -45,5 +46,15 @@ class WeiFormatterTests: XCTestCase {
     XCTAssertNil(formatter.weiString(from: "0.000000000000000001", radix: .decimal, decimals: 10))
     // Hex
     XCTAssertEqual(try XCTUnwrap(formatter.weiString(from: 0.1, radix: .hex, decimals: 18)), "16345785d8a0000")
+  }
+  
+  func testDecimalToLamports() {
+    let decimalInputString = "1"
+    let lamportsValueString = "1000000000"
+    let lamports = WeiFormatter.decimalToLamports(decimalInputString)
+    
+    XCTAssertNotNil(UInt64(lamportsValueString))
+    XCTAssertNotNil(lamports)
+    XCTAssertEqual(UInt64(lamportsValueString)!, lamports!)
   }
 }
