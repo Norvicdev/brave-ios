@@ -55,13 +55,28 @@ extension BraveWallet.BlockchainToken {
   )
   
   static let mockSolToken: BraveWallet.BlockchainToken = .init(
-    contractAddress: "0x1111111111222222222233333333334444444444",
+    contractAddress: "",
     name: "Solana",
     logo: "",
     isErc20: false,
     isErc721: false,
     symbol: "SOL",
     decimals: 9,
+    visible: false,
+    tokenId: "",
+    coingeckoId: "",
+    chainId: "",
+    coin: .sol
+  )
+  
+  static let mockSpdToken: BraveWallet.BlockchainToken = .init(
+    contractAddress: "0x1111111111222222222233333333334444444444",
+    name: "Solpad",
+    logo: "",
+    isErc20: false,
+    isErc721: false,
+    symbol: "SPD",
+    decimals: 6,
     visible: false,
     tokenId: "",
     coingeckoId: "",
